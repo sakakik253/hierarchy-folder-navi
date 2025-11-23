@@ -1317,13 +1317,186 @@ function Move-ToSelectedFolder {
         return
     }
     
-    # フォルダ選択ダイアログ
-    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = "移動先のフォルダを選択してください"
-    $dialog.ShowNewFolderButton = $true
+    # カスタム移動先選択ダイアログ
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "移動先フォルダの選択"
+    $form.Size = New-Object System.Drawing.Size(600, 400)
+    $form.StartPosition = "CenterScreen"
+    $form.Font = New-Object System.Drawing.Font("メイリオ", 10)
+    $form.MinimizeBox = $false
+    $form.MaximizeBox = $false
     
-    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        $destFolder = $dialog.SelectedPath
+    # 説明
+    $lblInfo = New-Object System.Windows.Forms.Label
+    $lblInfo.Location = New-Object System.Drawing.Point(20, 20)
+    $lblInfo.Size = New-Object System.Drawing.Size(550, 25)
+    $lblInfo.Text = "$($selectedItems.Count) 件のファイル/フォルダを移動します"
+    $lblInfo.ForeColor = [System.Drawing.Color]::Blue
+    
+    # パス入力
+    $lblPath = New-Object System.Windows.Forms.Label
+    $lblPath.Location = New-Object System.Drawing.Point(20, 60)
+    $lblPath.Size = New-Object System.Drawing.Size(100, 25)
+    $lblPath.Text = "移動先パス:"
+    
+    $txtPath = New-Object System.Windows.Forms.TextBox
+    $txtPath.Location = New-Object System.Drawing.Point(120, 57)
+    $txtPath.Size = New-Object System.Drawing.Size(360, 25)
+    $txtPath.Text = $script:currentPath
+    
+    $btnBrowse = New-Object System.Windows.Forms.Button
+    $btnBrowse.Location = New-Object System.Drawing.Point(490, 56)
+    $btnBrowse.Size = New-Object System.Drawing.Size(80, 28)
+    $btnBrowse.Text = "参照..."
+    $btnBrowse.Add_Click({
+        $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $folderDialog.Description = "移動先のフォルダを選択してください"
+        $folderDialog.ShowNewFolderButton = $true
+        if ($folderDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $txtPath.Text = $folderDialog.SelectedPath
+        }
+    })
+    
+    # 履歴から選択
+    $lblHistory = New-Object System.Windows.Forms.Label
+    $lblHistory.Location = New-Object System.Drawing.Point(20, 100)
+    $lblHistory.Size = New-Object System.Drawing.Size(100, 25)
+    $lblHistory.Text = "最近使用:"
+    
+    $cmbHistory = New-Object System.Windows.Forms.ComboBox
+    $cmbHistory.Location = New-Object System.Drawing.Point(120, 97)
+    $cmbHistory.Size = New-Object System.Drawing.Size(450, 25)
+    $cmbHistory.DropDownStyle = "DropDownList"
+    foreach ($h in $script:history) {
+        $cmbHistory.Items.Add($h) | Out-Null
+    }
+    $cmbHistory.Add_SelectedIndexChanged({
+        if ($cmbHistory.SelectedItem) {
+            $txtPath.Text = $cmbHistory.SelectedItem
+        }
+    })
+    
+    # ブックマークから選択
+    $lblBookmark = New-Object System.Windows.Forms.Label
+    $lblBookmark.Location = New-Object System.Drawing.Point(20, 140)
+    $lblBookmark.Size = New-Object System.Drawing.Size(100, 25)
+    $lblBookmark.Text = "ブックマーク:"
+    
+    $cmbBookmark = New-Object System.Windows.Forms.ComboBox
+    $cmbBookmark.Location = New-Object System.Drawing.Point(120, 137)
+    $cmbBookmark.Size = New-Object System.Drawing.Size(450, 25)
+    $cmbBookmark.DropDownStyle = "DropDownList"
+    foreach ($bm in $script:bookmarks) {
+        $cmbBookmark.Items.Add("$($bm.Name) - $($bm.Path)") | Out-Null
+    }
+    $cmbBookmark.Add_SelectedIndexChanged({
+        if ($cmbBookmark.SelectedIndex -ge 0) {
+            $txtPath.Text = $script:bookmarks[$cmbBookmark.SelectedIndex].Path
+        }
+    })
+    
+    # よく使うフォルダ
+    $grpQuick = New-Object System.Windows.Forms.GroupBox
+    $grpQuick.Location = New-Object System.Drawing.Point(20, 180)
+    $grpQuick.Size = New-Object System.Drawing.Size(550, 120)
+    $grpQuick.Text = "よく使うフォルダ"
+    
+    $btnDesktop = New-Object System.Windows.Forms.Button
+    $btnDesktop.Location = New-Object System.Drawing.Point(10, 25)
+    $btnDesktop.Size = New-Object System.Drawing.Size(120, 35)
+    $btnDesktop.Text = "デスクトップ"
+    $btnDesktop.Add_Click({
+        $txtPath.Text = [Environment]::GetFolderPath("Desktop")
+    })
+    
+    $btnDocuments = New-Object System.Windows.Forms.Button
+    $btnDocuments.Location = New-Object System.Drawing.Point(140, 25)
+    $btnDocuments.Size = New-Object System.Drawing.Size(120, 35)
+    $btnDocuments.Text = "ドキュメント"
+    $btnDocuments.Add_Click({
+        $txtPath.Text = [Environment]::GetFolderPath("MyDocuments")
+    })
+    
+    $btnDownloads = New-Object System.Windows.Forms.Button
+    $btnDownloads.Location = New-Object System.Drawing.Point(270, 25)
+    $btnDownloads.Size = New-Object System.Drawing.Size(120, 35)
+    $btnDownloads.Text = "ダウンロード"
+    $btnDownloads.Add_Click({
+        $txtPath.Text = Join-Path $env:USERPROFILE "Downloads"
+    })
+    
+    $btnUserProfile = New-Object System.Windows.Forms.Button
+    $btnUserProfile.Location = New-Object System.Drawing.Point(400, 25)
+    $btnUserProfile.Size = New-Object System.Drawing.Size(130, 35)
+    $btnUserProfile.Text = "ユーザーフォルダ"
+    $btnUserProfile.Add_Click({
+        $txtPath.Text = $env:USERPROFILE
+    })
+    
+    $btnCurrent = New-Object System.Windows.Forms.Button
+    $btnCurrent.Location = New-Object System.Drawing.Point(10, 70)
+    $btnCurrent.Size = New-Object System.Drawing.Size(120, 35)
+    $btnCurrent.Text = "現在のフォルダ"
+    $btnCurrent.Add_Click({
+        $txtPath.Text = $script:currentPath
+    })
+    
+    $grpQuick.Controls.AddRange(@($btnDesktop, $btnDocuments, $btnDownloads, $btnUserProfile, $btnCurrent))
+    
+    # ボタン
+    $btnOK = New-Object System.Windows.Forms.Button
+    $btnOK.Location = New-Object System.Drawing.Point(400, 320)
+    $btnOK.Size = New-Object System.Drawing.Size(80, 35)
+    $btnOK.Text = "移動"
+    $btnOK.BackColor = [System.Drawing.Color]::LightGreen
+    $btnOK.DialogResult = "OK"
+    
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Location = New-Object System.Drawing.Point(490, 320)
+    $btnCancel.Size = New-Object System.Drawing.Size(80, 35)
+    $btnCancel.Text = "キャンセル"
+    $btnCancel.DialogResult = "Cancel"
+    
+    $form.Controls.AddRange(@($lblInfo, $lblPath, $txtPath, $btnBrowse, 
+                              $lblHistory, $cmbHistory, $lblBookmark, $cmbBookmark,
+                              $grpQuick, $btnOK, $btnCancel))
+    $form.AcceptButton = $btnOK
+    $form.CancelButton = $btnCancel
+    
+    if ($form.ShowDialog() -eq "OK") {
+        $destFolder = $txtPath.Text.Trim()
+        
+        # パスの妥当性チェック
+        if ([string]::IsNullOrWhiteSpace($destFolder)) {
+            [System.Windows.MessageBox]::Show(
+                "移動先パスを入力してください",
+                "エラー", "OK", "Warning")
+            return
+        }
+        
+        if (!(Test-Path $destFolder)) {
+            $result = [System.Windows.MessageBox]::Show(
+                "指定されたフォルダが存在しません:`n$destFolder`n`n新しく作成しますか？",
+                "確認",
+                "YesNo",
+                "Question")
+            
+            if ($result -eq "Yes") {
+                try {
+                    New-Item -ItemType Directory -Path $destFolder -Force | Out-Null
+                    Write-Host "フォルダを作成しました: $destFolder" -ForegroundColor Green
+                }
+                catch {
+                    [System.Windows.MessageBox]::Show(
+                        "フォルダの作成に失敗しました:`n$_",
+                        "エラー", "OK", "Error")
+                    return
+                }
+            }
+            else {
+                return
+            }
+        }
         
         $successCount = 0
         $errorCount = 0
