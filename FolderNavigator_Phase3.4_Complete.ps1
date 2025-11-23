@@ -1159,9 +1159,13 @@ function Export-FolderStructure {
                     Get-ChildItem -Path $rootPath -ErrorAction SilentlyContinue
                 }
                 
+                # 階層構造でソート
+                $items = $items | Sort-Object FullName
+                
                 # CSV/TSV作成
                 $data = @()
-                $data += "種類${delimiter}パス${delimiter}名前" + 
+                # ヘッダー行（階層列を追加）
+                $data += "階層${delimiter}種類${delimiter}名前${delimiter}パス" + 
                          $(if ($chkSize.Checked) { "${delimiter}サイズ" } else { "" }) +
                          $(if ($chkDate.Checked) { "${delimiter}更新日時" } else { "" })
                 
@@ -1169,7 +1173,18 @@ function Export-FolderStructure {
                     $relativePath = $item.FullName.Replace($rootPath, "").TrimStart('\')
                     $type = if ($item.PSIsContainer) { "フォルダ" } else { "ファイル" }
                     
-                    $line = "$type${delimiter}$relativePath${delimiter}$($item.Name)"
+                    # 階層レベルを計算（\の数 = 階層）
+                    $level = 0
+                    if ($relativePath) {
+                        $level = ($relativePath.Split('\').Length) - 1
+                    }
+                    
+                    # 階層に応じてインデントを追加（全角スペース2つ）
+                    $indent = "　" * $level
+                    $displayName = $indent + $item.Name
+                    
+                    # 行を作成
+                    $line = "$level${delimiter}$type${delimiter}$displayName${delimiter}$relativePath"
                     
                     if ($chkSize.Checked) {
                         if ($item.PSIsContainer) {
