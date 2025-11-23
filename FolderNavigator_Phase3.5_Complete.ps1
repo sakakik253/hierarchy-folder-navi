@@ -1140,11 +1140,14 @@ function Delete-SelectedItems {
                          $(if ($errors.Count -gt 5) { "`n  ...他 $($errors.Count - 5) 件" } else { "" })
         }
         
+        $msgTitle = if ($errorCount -eq 0) { "完了" } else { "一部エラー" }
+        $msgIcon = if ($errorCount -eq 0) { "Information" } else { "Warning" }
+        
         [System.Windows.MessageBox]::Show(
             $resultMsg,
-            if ($errorCount -eq 0) { "完了" } else { "一部エラー" },
+            $msgTitle,
             "OK",
-            if ($errorCount -eq 0) { "Information" } else { "Warning" })
+            $msgIcon)
         
         # リスト更新
         Load-FileList $script:currentPath
