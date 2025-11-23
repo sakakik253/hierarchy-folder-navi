@@ -1,4 +1,52 @@
+# ===============================================
+# フォルダナビゲーター - Git除外設定
+# ===============================================
+
+# ログフォルダ
+logs/
+*.log
+
+# 旧バージョン・バックアップ
 old/
-*.txt
-~$*
+backup/
+*.bak
+*.backup
+
+# 一時ファイル
 *.tmp
+~$*
+Thumbs.db
+.DS_Store
+
+# テスト用ファイル
+test/
+*.test.ps1
+
+# Excelの一時ファイル
+~$*.xlsx
+~$*.xls
+~$*.xlsm
+
+# システムファイル
+desktop.ini
+.directory
+
+# IDEファイル
+.vscode/
+.idea/
+*.code-workspace
+
+# 環境変数ファイル
+.env
+.env.local
+.env.production
+
+# Node modules（将来の拡張用）
+node_modules/
+package-lock.json
+yarn.lock
+
+# その他
+*.zip
+*.rar
+*.7z
