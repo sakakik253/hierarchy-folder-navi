@@ -230,8 +230,12 @@ $mainXaml = @"
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" Text="ファイル一覧（Excel/テキストをドロップ）" FontSize="14" FontWeight="Bold" 
-                              Padding="10,5" Background="#2c3e50" Foreground="White"/>
+                    <StackPanel Grid.Row="0" Background="#2c3e50">
+                        <TextBlock Text="ファイル一覧（Excel/テキストをドロップ）" FontSize="14" FontWeight="Bold" 
+                                  Padding="10,5,10,2" Foreground="White"/>
+                        <TextBlock Text="複数選択: Ctrl+クリック / Shift+クリック" FontSize="9" 
+                                  Padding="10,0,10,5" Foreground="#ecf0f1"/>
+                    </StackPanel>
                     <DataGrid Name="dataGrid" Grid.Row="1" AutoGenerateColumns="False" 
                              CanUserAddRows="False" GridLinesVisibility="None" 
                              AlternatingRowBackground="#f8f9fa"
@@ -1770,13 +1774,38 @@ $treeView.Add_SelectedItemChanged({
 $dataGrid.Add_MouseDoubleClick({
     if ($dataGrid.SelectedItem) {
         $selectedItem = $dataGrid.SelectedItem
-        if ($selectedItem.Type -eq "フォルダ") {
-            $txtPath.Text = $selectedItem.FullPath
-            Load-FolderTree $selectedItem.FullPath
+        try {
+            if ($selectedItem.Type -eq "フォルダ") {
+                # フォルダの場合：そのフォルダに移動
+                $txtPath.Text = $selectedItem.FullPath
+                Load-FolderTree $selectedItem.FullPath
+                Write-Host "フォルダに移動: $($selectedItem.FullPath)" -ForegroundColor Cyan
+            }
+            else {
+                # ファイルの場合：関連付けられたアプリで開く
+                Start-Process $selectedItem.FullPath -ErrorAction Stop
+                Write-Host "ファイルを開く: $($selectedItem.Name)" -ForegroundColor Green
+            }
         }
-        else {
-            Start-Process $selectedItem.FullPath
+        catch {
+            [System.Windows.MessageBox]::Show(
+                "ファイル/フォルダを開けませんでした:`n$($selectedItem.Name)`n`nエラー: $_",
+                "エラー",
+                "OK",
+                "Error")
+            Write-Host "エラー: $($selectedItem.Name) - $_" -ForegroundColor Red
         }
+    }
+})
+
+# 選択変更時に選択件数を表示
+$dataGrid.Add_SelectionChanged({
+    $selectedCount = $dataGrid.SelectedItems.Count
+    if ($selectedCount -gt 0) {
+        $txtStatus.Text = "選択: $selectedCount 件"
+    }
+    else {
+        $txtStatus.Text = "準備完了 - ファイルをドラッグ＆ドロップしてください"
     }
 })
 
