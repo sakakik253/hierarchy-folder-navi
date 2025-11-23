@@ -1,6 +1,6 @@
-# ===============================================
-# フォルダナビゲーター Phase 3 完全版
-# Version: 3.0.0
+﻿# ===============================================
+# フォルダナビゲーター Phase 3.1 Complete
+# Version: 3.1.0
 # Date: 2024-11-23
 # Author: KENJI
 # ===============================================
@@ -11,19 +11,38 @@
 # - リアルタイム検索
 # - 新規フォルダ作成（試験項目連番対応）
 # - フォルダを開く（エクスプローラー起動）
-# - 一括リネーム機能（実運用版）
+# - 一括リネーム機能（実装済み）
 #   - プレフィックス追加
 #   - サフィックス追加
 #   - 文字列置換
 #   - 連番付与
 #   - プレビュー機能
-#   - エラー時即座に中止
-#   - ログファイル出力
+#   - 実際のリネーム実行
 # - ドラッグ&ドロップ機能
-#   - Excel/テキストファイルをコピー
+#   - Excel/テキストファイル対応
+#   - 上書き確認ダイアログ
+#   - 自動リスト更新
 # - 履歴機能（最近使用したフォルダ）
 # - ネットワークドライブ対応
 # ===============================================
+
+# STAモードチェック（WPF必須）
+if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host " WPFにはSTAモードが必要です" -ForegroundColor Yellow
+    Write-Host " STAモードで再起動します..." -ForegroundColor Yellow
+    Write-Host "========================================" -ForegroundColor Yellow
+    Start-Sleep -Seconds 2
+    
+    # STAモードで再起動（-Waitを削除して独立プロセスとして起動）
+    Start-Process powershell.exe -ArgumentList @(
+        "-STA",
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", "`"$PSCommandPath`""
+    )
+    exit
+}
 
 # 必要なアセンブリの読み込み
 Add-Type -AssemblyName PresentationFramework
@@ -37,13 +56,8 @@ Add-Type -AssemblyName Microsoft.VisualBasic
 $script:currentPath = ""
 $script:history = @()
 $script:maxHistory = 10
-$script:version = "3.0.0"
-$script:logFolder = Join-Path $PSScriptRoot "logs"
-
-# ログフォルダ作成
-if (!(Test-Path $script:logFolder)) {
-    New-Item -ItemType Directory -Path $script:logFolder | Out-Null
-}
+$script:version = "3.1.0"
+$script:previewItems = @()
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " フォルダナビゲーター v$script:version 起動中..." -ForegroundColor Cyan
@@ -53,8 +67,9 @@ Write-Host "========================================" -ForegroundColor Cyan
 $mainXaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="Folder Navigator v3.0 - Phase 3 Complete" Width="1200" Height="800"
-    WindowStartupLocation="CenterScreen" AllowDrop="True">
+    Title="Folder Navigator v3.1 - Phase 3 Complete" Width="1200" Height="800"
+    WindowStartupLocation="CenterScreen"
+    AllowDrop="True">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -77,7 +92,7 @@ $mainXaml = @"
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="Folder Path:" Foreground="White" 
                               VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBox Name="txtPath" Grid.Column="1" FontSize="12" Padding="5" AllowDrop="True"/>
+                    <TextBox Name="txtPath" Grid.Column="1" FontSize="12" Padding="5"/>
                     <Button Name="btnBrowse" Grid.Column="2" Content="Browse" Padding="10,5" 
                            Margin="5" MinWidth="80"/>
                     <Button Name="btnLoad" Grid.Column="3" Content="Load" Padding="10,5" 
@@ -127,18 +142,19 @@ $mainXaml = @"
             <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" 
                          VerticalAlignment="Stretch" Background="#95a5a6"/>
             
-            <!-- 右パネル: ファイル一覧（D&D対応） -->
-            <Border Grid.Column="2" BorderBrush="#bdc3c7" BorderThickness="1" Margin="5" AllowDrop="True" Name="dropZone">
+            <!-- 右パネル: ファイル一覧 -->
+            <Border Grid.Column="2" BorderBrush="#bdc3c7" BorderThickness="1" Margin="5">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" Text="Files and Folders (Drop Excel/Text here)" FontSize="14" FontWeight="Bold" 
+                    <TextBlock Grid.Row="0" Text="Files and Folders (Drop files here)" FontSize="14" FontWeight="Bold" 
                               Padding="10,5" Background="#2c3e50" Foreground="White"/>
                     <DataGrid Name="dataGrid" Grid.Row="1" AutoGenerateColumns="False" 
                              CanUserAddRows="False" GridLinesVisibility="None" 
-                             AlternatingRowBackground="#f8f9fa" AllowDrop="True">
+                             AlternatingRowBackground="#f8f9fa"
+                             AllowDrop="True">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="80"/>
                             <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
@@ -157,7 +173,7 @@ $mainXaml = @"
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Name="txtStatus" Grid.Column="0" Text="Ready" VerticalAlignment="Center"/>
+                <TextBlock Name="txtStatus" Grid.Column="0" Text="Ready - Drag &amp; Drop files here" VerticalAlignment="Center"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <Button Name="btnOpenFolder" Content="Open Folder" Padding="10,5" Margin="5" MinWidth="100"/>
                     <Button Name="btnNewFolder" Content="New Folder" Padding="10,5" Margin="5" MinWidth="100"/>
@@ -186,7 +202,9 @@ public class FileItem {
 # メインウィンドウ作成
 [xml]$x = $mainXaml
 $reader = New-Object System.Xml.XmlNodeReader $x
+$ErrorActionPreference = 'SilentlyContinue'
 $mainWindow = [Windows.Markup.XamlReader]::Load($reader)
+$ErrorActionPreference = 'Continue'
 
 # コントロール取得
 $txtPath = $mainWindow.FindName("txtPath")
@@ -196,7 +214,6 @@ $cmbHistory = $mainWindow.FindName("cmbHistory")
 $txtSearch = $mainWindow.FindName("txtSearch")
 $treeView = $mainWindow.FindName("treeView")
 $dataGrid = $mainWindow.FindName("dataGrid")
-$dropZone = $mainWindow.FindName("dropZone")
 $txtStatus = $mainWindow.FindName("txtStatus")
 $btnOpenFolder = $mainWindow.FindName("btnOpenFolder")
 $btnNewFolder = $mainWindow.FindName("btnNewFolder")
@@ -204,37 +221,138 @@ $btnTestFolder = $mainWindow.FindName("btnTestFolder")
 $btnBatchRename = $mainWindow.FindName("btnBatchRename")
 
 # ===============================================
-# ログ出力関数
+# ドラッグ&ドロップ機能
 # ===============================================
-function Write-RenameLog {
-    param(
-        [string]$Message,
-        [string]$Level = "INFO"
-    )
+
+# サポートする拡張子
+$script:supportedExtensions = @('.xlsx', '.xls', '.xlsm', '.txt', '.csv')
+
+# ドラッグエンター（視覚フィードバック）
+$mainWindow.Add_DragEnter({
+    param($sender, $e)
     
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "[$timestamp] [$Level] $Message"
+    if ($e.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) {
+        $files = $e.Data.GetData([Windows.Forms.DataFormats]::FileDrop)
+        $validFiles = $files | Where-Object {
+            $ext = [System.IO.Path]::GetExtension($_).ToLower()
+            $script:supportedExtensions -contains $ext
+        }
+        
+        if ($validFiles.Count -gt 0) {
+            $e.Effects = [System.Windows.DragDropEffects]::Copy
+            $txtStatus.Text = "ファイルをドロップしてコピー..."
+        }
+        else {
+            $e.Effects = [System.Windows.DragDropEffects]::None
+            $txtStatus.Text = "サポートされていないファイル形式です"
+        }
+    }
+    $e.Handled = $true
+})
+
+# ドラッグリーブ
+$mainWindow.Add_DragLeave({
+    $txtStatus.Text = "Ready - Drag & Drop files here"
+})
+
+# ドロップ（ファイルコピー処理）
+$mainWindow.Add_Drop({
+    param($sender, $e)
     
-    # ログファイル名（タイムスタンプ付き）
-    $logFileName = "rename_" + (Get-Date -Format "yyyyMMdd_HHmmss") + ".log"
-    $logFilePath = Join-Path $script:logFolder $logFileName
-    
-    # ログファイルに追記
-    Add-Content -Path $logFilePath -Value $logMessage -Encoding UTF8
-    
-    # コンソールにも出力
-    switch ($Level) {
-        "ERROR" { Write-Host $logMessage -ForegroundColor Red }
-        "SUCCESS" { Write-Host $logMessage -ForegroundColor Green }
-        "WARNING" { Write-Host $logMessage -ForegroundColor Yellow }
-        default { Write-Host $logMessage -ForegroundColor White }
+    if (!$script:currentPath) {
+        [System.Windows.MessageBox]::Show(
+            "先にフォルダを選択してください",
+            "エラー",
+            "OK",
+            "Warning"
+        )
+        return
     }
     
-    return $logFilePath
-}
+    if ($e.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) {
+        $files = $e.Data.GetData([Windows.Forms.DataFormats]::FileDrop)
+        $copiedCount = 0
+        $skippedCount = 0
+        
+        foreach ($file in $files) {
+            $ext = [System.IO.Path]::GetExtension($file).ToLower()
+            
+            # 拡張子チェック
+            if ($script:supportedExtensions -contains $ext) {
+                $fileName = [System.IO.Path]::GetFileName($file)
+                $destPath = Join-Path $script:currentPath $fileName
+                
+                # 同名ファイルチェック
+                if (Test-Path $destPath) {
+                    $result = [System.Windows.MessageBox]::Show(
+                        "ファイル '$fileName' は既に存在します。`n上書きしますか？",
+                        "上書き確認",
+                        "YesNo",
+                        "Question"
+                    )
+                    
+                    if ($result -eq "No") {
+                        $skippedCount++
+                        continue
+                    }
+                }
+                
+                try {
+                    Copy-Item -Path $file -Destination $destPath -Force
+                    $copiedCount++
+                    Write-Host "コピー完了: $fileName" -ForegroundColor Green
+                }
+                catch {
+                    [System.Windows.MessageBox]::Show(
+                        "ファイルのコピーに失敗しました:`n$fileName`n`nエラー: $_",
+                        "エラー",
+                        "OK",
+                        "Error"
+                    )
+                }
+            }
+        }
+        
+        # 結果表示
+        if ($copiedCount -gt 0) {
+            $message = "コピー完了: $copiedCount 件"
+            if ($skippedCount -gt 0) {
+                $message += " (スキップ: $skippedCount 件)"
+            }
+            $txtStatus.Text = $message
+            
+            # ファイルリスト更新
+            Load-FileList $script:currentPath
+        }
+        else {
+            $txtStatus.Text = "コピーされたファイルはありません"
+        }
+    }
+    
+    $e.Handled = $true
+})
+
+# DataGrid用ドラッグエンター
+$dataGrid.Add_DragEnter({
+    param($sender, $e)
+    
+    if ($e.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) {
+        $e.Effects = [System.Windows.DragDropEffects]::Copy
+    }
+    $e.Handled = $true
+})
+
+# DataGrid用ドロップ
+$dataGrid.Add_Drop({
+    param($sender, $e)
+    
+    # メインウィンドウのドロップ処理を呼び出し
+    $mainWindow_Drop = $mainWindow | Get-Member -Name "Drop" -MemberType Event
+    $mainWindow.RaiseEvent($e)
+})
 
 # ===============================================
-# 一括リネーム機能（実運用版）
+# 一括リネーム機能
 # ===============================================
 function Show-BatchRenameDialog {
     param($currentPath)
@@ -248,7 +366,7 @@ function Show-BatchRenameDialog {
     
     # リネームフォーム作成
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "一括リネームツール（実運用版）"
+    $form.Text = "一括リネームツール"
     $form.Size = New-Object System.Drawing.Size(750, 650)
     $form.StartPosition = "CenterScreen"
     $form.Font = New-Object System.Drawing.Font("メイリオ", 10)
@@ -388,13 +506,10 @@ function Show-BatchRenameDialog {
     })
     
     # プレビュー処理
-    $script:previewItems = @()  # プレビューデータを保存
-    
     $btnPreview.Add_Click({
         $listBox.Items.Clear()
-        $script:previewItems = @()
-        
-        $items = Get-ChildItem -Path $currentPath -ErrorAction SilentlyContinue
+        $script:previewItems = @()  # 初期化
+        $items = Get-ChildItem -Path $currentPath -ErrorAction SilentlyContinue | Select-Object -First 30
         $counter = 1
         
         foreach ($item in $items) {
@@ -441,90 +556,71 @@ function Show-BatchRenameDialog {
         $btnExecute.Enabled = $listBox.Items.Count -gt 0
     })
     
-    # 実行処理（実際のリネーム - Phase 3）
+    # 実行処理（実際のリネーム）
     $btnExecute.Add_Click({
         $result = [System.Windows.Forms.MessageBox]::Show(
-            "本当にリネームを実行しますか？`n`n⚠️ この操作は取り消せません`n⚠️ エラーが発生した場合は即座に中止されます",
+            "本当にリネームを実行しますか？`n`nこの操作は取り消せません。",
             "最終確認",
             "YesNo",
             "Warning"
         )
         
         if ($result -eq "Yes") {
-            # ログファイルのパスを初期化
-            $logFilePath = ""
+            $successCount = 0
+            $failCount = 0
+            $errorMessages = @()
             
             try {
-                # ログ開始
-                $logFilePath = Write-RenameLog "========== リネーム処理開始 ==========" "INFO"
-                Write-RenameLog "対象フォルダ: $currentPath" "INFO"
-                Write-RenameLog "リネーム方式: $($cmbType.SelectedItem)" "INFO"
-                Write-RenameLog "処理対象件数: $($script:previewItems.Count)" "INFO"
-                Write-RenameLog "" "INFO"
-                
-                $successCount = 0
-                $totalCount = $script:previewItems.Count
-                
-                # 実際のリネーム処理
-                foreach ($item in $script:previewItems) {
-                    $oldPath = $item.OldPath
-                    $newPath = Join-Path (Split-Path $oldPath -Parent) $item.NewName
+                foreach ($previewItem in $script:previewItems) {
+                    $oldPath = $previewItem.OldPath
+                    $newName = $previewItem.NewName
+                    $parentPath = Split-Path $oldPath -Parent
+                    $newPath = Join-Path $parentPath $newName
                     
-                    Write-RenameLog "処理中: $($item.OldName) → $($item.NewName)" "INFO"
-                    
-                    # 同名ファイルチェック
-                    if (Test-Path $newPath) {
-                        $errorMsg = "エラー: 同名のファイル/フォルダが既に存在します - $($item.NewName)"
-                        Write-RenameLog $errorMsg "ERROR"
-                        throw $errorMsg
+                    # 同名チェック
+                    if ($oldPath -ne $newPath -and (Test-Path $newPath)) {
+                        $errorMsg = "同名のファイル/フォルダが存在: $newName"
+                        $errorMessages += $errorMsg
+                        [System.Windows.Forms.MessageBox]::Show(
+                            $errorMsg + "`n`n処理を中止します。",
+                            "エラー",
+                            "OK",
+                            "Error"
+                        )
+                        $failCount++
+                        break
                     }
                     
                     # リネーム実行
-                    try {
-                        Rename-Item -Path $oldPath -NewName $item.NewName -ErrorAction Stop
+                    if ($oldPath -ne $newPath) {
+                        Rename-Item -Path $oldPath -NewName $newName -ErrorAction Stop
                         $successCount++
-                        Write-RenameLog "成功: $($item.OldName) → $($item.NewName)" "SUCCESS"
-                    }
-                    catch {
-                        $errorMsg = "エラー: リネーム失敗 - $($item.OldName)`n詳細: $($_.Exception.Message)"
-                        Write-RenameLog $errorMsg "ERROR"
-                        throw $errorMsg
                     }
                 }
                 
-                # 全て成功
-                Write-RenameLog "" "INFO"
-                Write-RenameLog "========== リネーム処理完了 ==========" "SUCCESS"
-                Write-RenameLog "成功: $successCount / $totalCount 件" "SUCCESS"
-                
-                [System.Windows.Forms.MessageBox]::Show(
-                    "リネームが完了しました！`n`n成功: $successCount / $totalCount 件`n`nログファイル:`n$logFilePath",
-                    "完了",
-                    "OK",
-                    "Information"
-                )
-                
-                $form.Close()
-                
-                # ファイルリスト更新
-                Load-FileList $currentPath
+                # 結果表示
+                if ($failCount -eq 0) {
+                    [System.Windows.Forms.MessageBox]::Show(
+                        "リネームが完了しました！`n`n成功: $successCount 件",
+                        "完了",
+                        "OK",
+                        "Information"
+                    )
+                    
+                    # ファイルリストを更新
+                    Load-FileList $currentPath
+                    $form.Close()
+                }
             }
             catch {
-                # エラー発生時
-                Write-RenameLog "" "ERROR"
-                Write-RenameLog "========== リネーム処理中断 ==========" "ERROR"
-                Write-RenameLog "成功: $successCount / $totalCount 件（途中で中止）" "WARNING"
-                Write-RenameLog "エラー内容: $_" "ERROR"
-                
+                $errorMsg = "リネーム中にエラーが発生しました: $_"
+                $errorMessages += $errorMsg
                 [System.Windows.Forms.MessageBox]::Show(
-                    "エラーが発生したため処理を中止しました`n`n成功: $successCount / $totalCount 件`n`nエラー内容:`n$_`n`nログファイル:`n$logFilePath",
+                    $errorMsg + "`n`n成功: $successCount 件`n失敗: $($failCount + 1) 件",
                     "エラー",
                     "OK",
                     "Error"
                 )
-                
-                # ファイルリスト更新
-                Load-FileList $currentPath
             }
         }
     })
@@ -568,77 +664,54 @@ function Load-FolderTree {
     $treeView.Items.Clear()
     
     try {
-        $script:currentPath = $path
-        
-        # 履歴に追加
-        if ($script:history -notcontains $path) {
-            $script:history = @($path) + $script:history
-            if ($script:history.Count -gt $script:maxHistory) {
-                $script:history = $script:history[0..($script:maxHistory - 1)]
-            }
-            Update-HistoryComboBox
-        }
-        
         $rootItem = New-Object System.Windows.Controls.TreeViewItem
         $rootItem.Header = Split-Path $path -Leaf
         if (!$rootItem.Header) { $rootItem.Header = $path }
         $rootItem.Tag = $path
-        
-        # ドライブレベルの場合
-        if ($path.Length -le 3) {
-            Load-SubFolders -parentItem $rootItem -path $path -depth 0 -maxDepth 2
-        }
-        else {
-            Load-SubFolders -parentItem $rootItem -path $path -depth 0 -maxDepth 1
-        }
-        
         $rootItem.IsExpanded = $true
+        
+        Load-SubFolders -parentItem $rootItem -path $path -depth 0 -maxDepth 2
+        
         $treeView.Items.Add($rootItem)
         
-        Load-FileList $path
-        $txtStatus.Text = "読み込み完了: $path"
+        $script:currentPath = $path
+        $txtStatus.Text = "現在: $path"
+        
+        # 履歴に追加
+        if ($script:history -notcontains $path) {
+            $script:history = @($path) + $script:history | Select-Object -First $script:maxHistory
+            Update-HistoryComboBox
+        }
     }
     catch {
-        $txtStatus.Text = "エラー: $_"
-        Write-Host "エラー: $_" -ForegroundColor Red
+        [System.Windows.MessageBox]::Show(
+            "フォルダの読み込みに失敗しました:`n$_", 
+            "エラー", "OK", "Error")
+        $txtStatus.Text = "エラーが発生しました"
     }
 }
 
 # サブフォルダ読み込み
 function Load-SubFolders {
-    param(
-        $parentItem,
-        $path,
-        $depth,
-        $maxDepth
-    )
+    param($parentItem, $path, $depth, $maxDepth)
     
-    if ($depth -ge $maxDepth) {
-        $dummyItem = New-Object System.Windows.Controls.TreeViewItem
-        $dummyItem.Header = "読み込み中..."
-        $parentItem.Items.Add($dummyItem)
-        return
-    }
+    if ($depth -ge $maxDepth) { return }
     
     try {
         $folders = Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue | 
-                   Sort-Object Name
+                   Where-Object { !$_.Attributes.HasFlag([System.IO.FileAttributes]::Hidden) -and 
+                                 !$_.Attributes.HasFlag([System.IO.FileAttributes]::System) }
         
         foreach ($folder in $folders) {
             $item = New-Object System.Windows.Controls.TreeViewItem
             $item.Header = $folder.Name
             $item.Tag = $folder.FullName
             
-            if ($depth + 1 -lt $maxDepth) {
-                Load-SubFolders -parentItem $item -path $folder.FullName -depth ($depth + 1) -maxDepth $maxDepth
-            }
-            else {
-                $hasSubFolders = (Get-ChildItem -Path $folder.FullName -Directory -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
-                if ($hasSubFolders) {
-                    $dummyItem = New-Object System.Windows.Controls.TreeViewItem
-                    $dummyItem.Header = "読み込み中..."
-                    $item.Items.Add($dummyItem)
-                }
+            # 遅延読み込み用ダミー
+            if ((Get-ChildItem -Path $folder.FullName -Directory -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+                $dummy = New-Object System.Windows.Controls.TreeViewItem
+                $dummy.Header = "読み込み中..."
+                $item.Items.Add($dummy)
             }
             
             $parentItem.Items.Add($item)
@@ -653,31 +726,33 @@ function Load-SubFolders {
 function Load-FileList {
     param($path)
     
+    if (!(Test-Path $path)) { return }
+    
     $dataGrid.Items.Clear()
     
     try {
-        $folders = Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue | Sort-Object Name
-        $files = Get-ChildItem -Path $path -File -ErrorAction SilentlyContinue | Sort-Object Name
-        
-        # フォルダ追加
+        # フォルダを追加
+        $folders = Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue
         foreach ($folder in $folders) {
             $item = New-Object FileItem
             $item.Type = "フォルダ"
             $item.Name = $folder.Name
-            $item.Size = "-"
+            $item.Size = ""
             $item.Modified = $folder.LastWriteTime.ToString("yyyy/MM/dd HH:mm")
             $item.FullPath = $folder.FullName
             $dataGrid.Items.Add($item)
         }
         
-        # ファイル追加
+        # ファイルを追加
+        $files = Get-ChildItem -Path $path -File -ErrorAction SilentlyContinue
         foreach ($file in $files) {
             $item = New-Object FileItem
             $item.Type = "ファイル"
             $item.Name = $file.Name
             
+            # サイズフォーマット
             if ($file.Length -lt 1KB) {
-                $item.Size = "{0} B" -f $file.Length
+                $item.Size = "$($file.Length) B"
             }
             elseif ($file.Length -lt 1MB) {
                 $item.Size = "{0:N1} KB" -f ($file.Length / 1KB)
@@ -782,162 +857,6 @@ function Create-TestFolder {
         }
     }
 }
-
-# ===============================================
-# ドラッグ&ドロップ機能（Phase 3 新機能）
-# ===============================================
-
-# 対応ファイル形式チェック
-function Test-SupportedFileType {
-    param($filePath)
-    
-    $supportedExtensions = @(".xlsx", ".xls", ".xlsm", ".txt", ".csv")
-    $extension = [System.IO.Path]::GetExtension($filePath).ToLower()
-    
-    return $supportedExtensions -contains $extension
-}
-
-# DragEnterイベント（視覚フィードバック）
-$mainWindow.Add_DragEnter({
-    param($sender, $e)
-    
-    if (!$script:currentPath) {
-        $e.Effects = [System.Windows.DragDropEffects]::None
-        return
-    }
-    
-    if ($e.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) {
-        $files = $e.Data.GetData([Windows.Forms.DataFormats]::FileDrop)
-        
-        # サポートされているファイル形式かチェック
-        $hasValidFile = $false
-        foreach ($file in $files) {
-            if ((Test-Path $file -PathType Leaf) -and (Test-SupportedFileType $file)) {
-                $hasValidFile = $true
-                break
-            }
-        }
-        
-        if ($hasValidFile) {
-            $e.Effects = [System.Windows.DragDropEffects]::Copy
-        } else {
-            $e.Effects = [System.Windows.DragDropEffects]::None
-        }
-    }
-    else {
-        $e.Effects = [System.Windows.DragDropEffects]::None
-    }
-})
-
-# Dropイベント（ファイルコピー）
-$mainWindow.Add_Drop({
-    param($sender, $e)
-    
-    if (!$script:currentPath) {
-        [System.Windows.MessageBox]::Show(
-            "先にフォルダを選択してください", 
-            "情報", "OK", "Information")
-        return
-    }
-    
-    if ($e.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) {
-        $files = $e.Data.GetData([Windows.Forms.DataFormats]::FileDrop)
-        
-        $copiedFiles = @()
-        $errors = @()
-        
-        foreach ($file in $files) {
-            # ファイルのみ処理（フォルダは無視）
-            if (Test-Path $file -PathType Leaf) {
-                # サポートされているファイル形式かチェック
-                if (Test-SupportedFileType $file) {
-                    $fileName = [System.IO.Path]::GetFileName($file)
-                    $destination = Join-Path $script:currentPath $fileName
-                    
-                    try {
-                        # 同名ファイルがある場合は確認
-                        if (Test-Path $destination) {
-                            $result = [System.Windows.MessageBox]::Show(
-                                "同名のファイルが既に存在します:`n$fileName`n`n上書きしますか？",
-                                "確認",
-                                "YesNo",
-                                "Question"
-                            )
-                            
-                            if ($result -eq "No") {
-                                continue
-                            }
-                        }
-                        
-                        # ファイルコピー
-                        Copy-Item -Path $file -Destination $destination -Force
-                        $copiedFiles += $fileName
-                    }
-                    catch {
-                        $errors += "$fileName : $_"
-                    }
-                }
-            }
-        }
-        
-        # 結果表示
-        if ($copiedFiles.Count -gt 0) {
-            $message = "ファイルをコピーしました:`n`n" + ($copiedFiles -join "`n")
-            
-            if ($errors.Count -gt 0) {
-                $message += "`n`nエラー:`n" + ($errors -join "`n")
-            }
-            
-            [System.Windows.MessageBox]::Show(
-                $message,
-                "コピー完了",
-                "OK",
-                "Information"
-            )
-            
-            # ファイルリスト更新
-            Load-FileList $script:currentPath
-        }
-        elseif ($errors.Count -gt 0) {
-            [System.Windows.MessageBox]::Show(
-                "エラーが発生しました:`n`n" + ($errors -join "`n"),
-                "エラー",
-                "OK",
-                "Error"
-            )
-        }
-        else {
-            [System.Windows.MessageBox]::Show(
-                "対応していないファイル形式です`n`n対応形式: Excel (.xlsx, .xls, .xlsm), Text (.txt, .csv)",
-                "情報",
-                "OK",
-                "Information"
-            )
-        }
-    }
-})
-
-# DataGridにもD&D機能を追加
-$dataGrid.Add_DragEnter({
-    param($sender, $e)
-    $mainWindow_DragEnter.Invoke($sender, $e)
-})
-
-$dataGrid.Add_Drop({
-    param($sender, $e)
-    $mainWindow_Drop.Invoke($sender, $e)
-})
-
-# DropZoneにもD&D機能を追加
-$dropZone.Add_DragEnter({
-    param($sender, $e)
-    $mainWindow_DragEnter.Invoke($sender, $e)
-})
-
-$dropZone.Add_Drop({
-    param($sender, $e)
-    $mainWindow_Drop.Invoke($sender, $e)
-})
 
 # ===============================================
 # イベントハンドラ
@@ -1061,12 +980,9 @@ Write-Host "  ✅ フォルダツリー表示" -ForegroundColor White
 Write-Host "  ✅ ファイル・フォルダ一覧" -ForegroundColor White
 Write-Host "  ✅ 新規フォルダ作成" -ForegroundColor White
 Write-Host "  ✅ 試験項目フォルダ（連番）" -ForegroundColor White
-Write-Host "  ✅ 一括リネーム機能（実運用版）" -ForegroundColor White
-Write-Host "  ✅ ドラッグ&ドロップ（Excel/Text）" -ForegroundColor White
+Write-Host "  ✅ 一括リネーム機能（実装済み）" -ForegroundColor White
+Write-Host "  ✅ ドラッグ&ドロップ機能" -ForegroundColor White
 Write-Host "  ✅ 履歴機能" -ForegroundColor White
-Write-Host ""
-Write-Host "【ログフォルダ】" -ForegroundColor Yellow
-Write-Host "  $script:logFolder" -ForegroundColor White
 Write-Host ""
 
 # メインウィンドウ表示
