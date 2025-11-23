@@ -1772,30 +1772,38 @@ $treeView.Add_SelectedItemChanged({
 })
 
 $dataGrid.Add_MouseDoubleClick({
+    param($sender, $e)
+    
     if ($dataGrid.SelectedItem) {
         $selectedItem = $dataGrid.SelectedItem
+        
         try {
             if ($selectedItem.Type -eq "フォルダ") {
                 # フォルダの場合：そのフォルダに移動
+                Write-Host "フォルダダブルクリック: $($selectedItem.Name)" -ForegroundColor Cyan
                 $txtPath.Text = $selectedItem.FullPath
                 Load-FolderTree $selectedItem.FullPath
-                Write-Host "フォルダに移動: $($selectedItem.FullPath)" -ForegroundColor Cyan
+                Write-Host "フォルダに移動完了: $($selectedItem.FullPath)" -ForegroundColor Green
             }
             else {
-                # ファイルの場合：関連付けられたアプリで開く
-                Start-Process $selectedItem.FullPath -ErrorAction Stop
-                Write-Host "ファイルを開く: $($selectedItem.Name)" -ForegroundColor Green
+                # ファイルの場合：関連付けられたアプリで開く（バックグラウンドで）
+                Write-Host "ファイルを開く: $($selectedItem.Name)" -ForegroundColor Cyan
+                $process = Start-Process -FilePath $selectedItem.FullPath -PassThru -ErrorAction Stop
+                Write-Host "ファイルを開きました: $($selectedItem.Name) (PID: $($process.Id))" -ForegroundColor Green
             }
         }
         catch {
+            Write-Host "エラー発生: $($selectedItem.Name) - $_" -ForegroundColor Red
             [System.Windows.MessageBox]::Show(
                 "ファイル/フォルダを開けませんでした:`n$($selectedItem.Name)`n`nエラー: $_",
                 "エラー",
                 "OK",
                 "Error")
-            Write-Host "エラー: $($selectedItem.Name) - $_" -ForegroundColor Red
         }
     }
+    
+    # イベントの伝播を停止
+    $e.Handled = $true
 })
 
 # 選択変更時に選択件数を表示
