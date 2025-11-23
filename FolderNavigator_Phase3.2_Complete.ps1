@@ -139,7 +139,9 @@ $mainXaml = @"
                     </Grid.RowDefinitions>
                     <TextBlock Grid.Row="0" Text="フォルダツリー" FontSize="14" FontWeight="Bold" 
                               Padding="10,5" Background="#2c3e50" Foreground="White"/>
-                    <TreeView Name="treeView" Grid.Row="1" FontSize="12" Padding="5"/>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <TreeView Name="treeView" FontSize="12" Padding="5" BorderThickness="0"/>
+                    </ScrollViewer>
                 </Grid>
             </Border>
             
@@ -159,7 +161,11 @@ $mainXaml = @"
                     <DataGrid Name="dataGrid" Grid.Row="1" AutoGenerateColumns="False" 
                              CanUserAddRows="False" GridLinesVisibility="None" 
                              AlternatingRowBackground="#f8f9fa"
-                             AllowDrop="True">
+                             AllowDrop="True"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Auto"
+                             EnableRowVirtualization="True"
+                             EnableColumnVirtualization="True">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="種類" Binding="{Binding Type}" Width="80"/>
                             <DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="2*"/>
