@@ -112,8 +112,9 @@ $mainXaml = @"
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="検索：" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                <TextBox Name="txtSearch" Grid.Column="1" FontSize="12" Padding="5"/>
+                <TextBlock Grid.Column="0" Text="検索（配下すべて）：" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <TextBox Name="txtSearch" Grid.Column="1" FontSize="12" Padding="5" 
+                         ToolTip="配下のすべてのフォルダから検索します"/>
                 <Button Name="btnSearchClear" Grid.Column="2" Content="×" Width="30" Margin="5,0,0,0" 
                         ToolTip="クリア" FontSize="16" FontWeight="Bold"/>
                 <TextBlock Grid.Column="3" Text="履歴：" VerticalAlignment="Center" Margin="20,0,10,0"/>
@@ -934,7 +935,7 @@ $dataGrid.Add_MouseDoubleClick({
     }
 })
 
-# 検索機能（リアルタイムフィルタリング）
+# 検索機能（リアルタイムフィルタリング - 再帰的）
 $txtSearch.Add_TextChanged({
     try {
         $searchText = $txtSearch.Text.Trim().ToLower()
@@ -944,61 +945,71 @@ $txtSearch.Add_TextChanged({
             return
         }
         
-        # すべてのアイテムを取得
-        $folders = Get-ChildItem -Path $script:currentPath -Directory -ErrorAction SilentlyContinue | Sort-Object Name
-        $files = Get-ChildItem -Path $script:currentPath -File -ErrorAction SilentlyContinue | Sort-Object Name
-        
-        # フィルタリング
+        # 検索テキストがある場合は再帰的に検索
         if (![string]::IsNullOrWhiteSpace($searchText)) {
-            $folders = $folders | Where-Object { $_.Name.ToLower().Contains($searchText) }
-            $files = $files | Where-Object { $_.Name.ToLower().Contains($searchText) }
-        }
-        
-        # フォルダ追加
-        foreach ($folder in $folders) {
-            $item = New-Object FileItem
-            $item.Type = "フォルダ"
-            $item.Name = $folder.Name
-            $item.Size = "-"
-            $item.Modified = $folder.LastWriteTime.ToString("yyyy/MM/dd HH:mm")
-            $item.FullPath = $folder.FullName
-            $dataGrid.Items.Add($item)
-        }
-        
-        # ファイル追加
-        foreach ($file in $files) {
-            $item = New-Object FileItem
-            $item.Type = "ファイル"
-            $item.Name = $file.Name
+            $txtStatus.Text = "検索中..."
             
-            if ($file.Length -lt 1KB) {
-                $item.Size = "{0} B" -f $file.Length
-            }
-            elseif ($file.Length -lt 1MB) {
-                $item.Size = "{0:N1} KB" -f ($file.Length / 1KB)
-            }
-            elseif ($file.Length -lt 1GB) {
-                $item.Size = "{0:N1} MB" -f ($file.Length / 1MB)
-            }
-            else {
-                $item.Size = "{0:N1} GB" -f ($file.Length / 1GB)
+            # 配下のすべてのフォルダを再帰的に取得
+            $folders = Get-ChildItem -Path $script:currentPath -Directory -Recurse -ErrorAction SilentlyContinue |
+                       Where-Object { $_.Name.ToLower().Contains($searchText) } |
+                       Sort-Object FullName
+            
+            # 配下のすべてのファイルを再帰的に取得
+            $files = Get-ChildItem -Path $script:currentPath -File -Recurse -ErrorAction SilentlyContinue |
+                     Where-Object { $_.Name.ToLower().Contains($searchText) } |
+                     Sort-Object FullName
+            
+            # フォルダ追加
+            foreach ($folder in $folders) {
+                $item = New-Object FileItem
+                $item.Type = "フォルダ"
+                # 相対パスを表示
+                $relativePath = $folder.FullName.Replace($script:currentPath, "").TrimStart('\')
+                $item.Name = $relativePath
+                $item.Size = "-"
+                $item.Modified = $folder.LastWriteTime.ToString("yyyy/MM/dd HH:mm")
+                $item.FullPath = $folder.FullName
+                $dataGrid.Items.Add($item)
             }
             
-            $item.Modified = $file.LastWriteTime.ToString("yyyy/MM/dd HH:mm")
-            $item.FullPath = $file.FullName
-            $dataGrid.Items.Add($item)
+            # ファイル追加
+            foreach ($file in $files) {
+                $item = New-Object FileItem
+                $item.Type = "ファイル"
+                # 相対パスを表示
+                $relativePath = $file.FullName.Replace($script:currentPath, "").TrimStart('\')
+                $item.Name = $relativePath
+                
+                if ($file.Length -lt 1KB) {
+                    $item.Size = "{0} B" -f $file.Length
+                }
+                elseif ($file.Length -lt 1MB) {
+                    $item.Size = "{0:N1} KB" -f ($file.Length / 1KB)
+                }
+                elseif ($file.Length -lt 1GB) {
+                    $item.Size = "{0:N1} MB" -f ($file.Length / 1MB)
+                }
+                else {
+                    $item.Size = "{0:N1} GB" -f ($file.Length / 1GB)
+                }
+                
+                $item.Modified = $file.LastWriteTime.ToString("yyyy/MM/dd HH:mm")
+                $item.FullPath = $file.FullName
+                $dataGrid.Items.Add($item)
+            }
+            
+            # ステータス更新
+            $totalCount = $folders.Count + $files.Count
+            $txtStatus.Text = "検索結果（再帰的）: $totalCount 件（フォルダ: $($folders.Count) / ファイル: $($files.Count)）"
         }
-        
-        # ステータス更新
-        $totalCount = $folders.Count + $files.Count
-        if (![string]::IsNullOrWhiteSpace($searchText)) {
-            $txtStatus.Text = "検索結果: $totalCount 件（フォルダ: $($folders.Count) / ファイル: $($files.Count)）"
-        } else {
-            $txtStatus.Text = "現在: $script:currentPath (フォルダ: $($folders.Count) / ファイル: $($files.Count))"
+        else {
+            # 検索テキストが空の場合は現在のフォルダのみ表示
+            Load-FileList $script:currentPath
         }
     }
     catch {
         Write-Host "検索エラー: $_" -ForegroundColor Red
+        $txtStatus.Text = "検索エラーが発生しました"
     }
 })
 
@@ -1058,7 +1069,7 @@ Write-Host "  ✅ 新規フォルダ作成" -ForegroundColor White
 Write-Host "  ✅ 試験項目フォルダ（連番）" -ForegroundColor White
 Write-Host "  ✅ 一括リネーム機能（実装済み）" -ForegroundColor White
 Write-Host "  ✅ ドラッグ&ドロップ（Excel/Text）" -ForegroundColor White
-Write-Host "  ✅ 検索機能（リアルタイム）" -ForegroundColor Green
+Write-Host "  ✅ 再帰検索機能（配下すべて）" -ForegroundColor Green
 Write-Host "  ✅ 履歴機能" -ForegroundColor White
 Write-Host ""
 
