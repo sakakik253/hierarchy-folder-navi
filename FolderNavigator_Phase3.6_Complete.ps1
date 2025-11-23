@@ -247,6 +247,8 @@ $mainXaml = @"
                              EnableColumnVirtualization="True">
                         <DataGrid.ContextMenu>
                             <ContextMenu>
+                                <MenuItem Name="menuOpen" Header="開く (Enter)" FontWeight="Bold" />
+                                <Separator/>
                                 <MenuItem Name="menuCopy" Header="コピー (Ctrl+C)" />
                                 <MenuItem Name="menuCut" Header="切り取り (Ctrl+X)" />
                                 <MenuItem Name="menuPaste" Header="貼り付け (Ctrl+V)" />
@@ -350,6 +352,7 @@ $btnDelete = $mainWindow.FindName("btnDelete")
 $btnBatchRename = $mainWindow.FindName("btnBatchRename")
 $lstBookmarks = $mainWindow.FindName("lstBookmarks")
 $btnAddBookmark = $mainWindow.FindName("btnAddBookmark")
+$menuOpen = $mainWindow.FindName("menuOpen")
 $menuCopy = $mainWindow.FindName("menuCopy")
 $menuCut = $mainWindow.FindName("menuCut")
 $menuPaste = $mainWindow.FindName("menuPaste")
@@ -1771,25 +1774,24 @@ $treeView.Add_SelectedItemChanged({
     }
 })
 
-$dataGrid.Add_MouseDoubleClick({
-    param($sender, $e)
-    
+# ファイル/フォルダを開く共通関数
+function Open-SelectedItem {
     if ($dataGrid.SelectedItem) {
         $selectedItem = $dataGrid.SelectedItem
         
         try {
             if ($selectedItem.Type -eq "フォルダ") {
                 # フォルダの場合：そのフォルダに移動
-                Write-Host "フォルダダブルクリック: $($selectedItem.Name)" -ForegroundColor Cyan
+                Write-Host "フォルダを開く: $($selectedItem.Name)" -ForegroundColor Cyan
                 $txtPath.Text = $selectedItem.FullPath
                 Load-FolderTree $selectedItem.FullPath
                 Write-Host "フォルダに移動完了: $($selectedItem.FullPath)" -ForegroundColor Green
             }
             else {
-                # ファイルの場合：関連付けられたアプリで開く（バックグラウンドで）
+                # ファイルの場合：関連付けられたアプリで開く
                 Write-Host "ファイルを開く: $($selectedItem.Name)" -ForegroundColor Cyan
-                $process = Start-Process -FilePath $selectedItem.FullPath -PassThru -ErrorAction Stop
-                Write-Host "ファイルを開きました: $($selectedItem.Name) (PID: $($process.Id))" -ForegroundColor Green
+                Start-Process -FilePath $selectedItem.FullPath -ErrorAction Stop
+                Write-Host "ファイルを開きました: $($selectedItem.Name)" -ForegroundColor Green
             }
         }
         catch {
@@ -1801,10 +1803,7 @@ $dataGrid.Add_MouseDoubleClick({
                 "Error")
         }
     }
-    
-    # イベントの伝播を停止
-    $e.Handled = $true
-})
+}
 
 # 選択変更時に選択件数を表示
 $dataGrid.Add_SelectionChanged({
@@ -1945,6 +1944,10 @@ $btnBatchRename.Add_Click({
 })
 
 # 右クリックメニュー
+$menuOpen.Add_Click({
+    Open-SelectedItem
+})
+
 $menuCopy.Add_Click({
     Copy-SelectedItems $false
 })
@@ -1963,7 +1966,11 @@ $menuDelete.Add_Click({
 
 # キーボードショートカット
 $dataGrid.Add_KeyDown({
-    if ($_.Key -eq "Delete") {
+    if ($_.Key -eq "Return" -or $_.Key -eq "Enter") {
+        # Enterキーで開く
+        Open-SelectedItem
+    }
+    elseif ($_.Key -eq "Delete") {
         Delete-SelectedItems
     }
     elseif ($_.Key -eq "C" -and $_.KeyboardDevice.Modifiers -eq "Control") {
